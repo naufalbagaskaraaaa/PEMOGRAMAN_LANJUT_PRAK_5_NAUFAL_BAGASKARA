@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"latihan-fiber/app/repository"
 	"latihan-fiber/app/service"
 	"latihan-fiber/config"
 	"latihan-fiber/database"
+	"latihan-fiber/helper"
 	appMiddleware "latihan-fiber/middleware"
 	"latihan-fiber/route"
 
@@ -30,6 +32,13 @@ func main() {
 
 	studentRepo := repository.NewStudentRepository(pool)
 	studentService := service.NewStudentService(studentRepo)
+	authRepo := repository.NewAuthRepository(pool)
+	jwtSecret, err := config.RequiredEnv("JWT_SECRET")
+	if err != nil {
+		log.Fatal(err)
+	}
+	jwtManager := helper.NewJWTManager(jwtSecret, 15*time.Minute)
+	authService := service.NewAuthService(authRepo, jwtManager, 15*time.Minute, 30*24*time.Hour)
 
 	app := fiber.New(fiber.Config{
 		AppName:      "Tugas Mandiri REST API - Student Management",
@@ -38,7 +47,7 @@ func main() {
 
 	appMiddleware.Register(app)
 
-	route.Register(app, pool, studentService)
+	route.Register(app, pool, studentService, authService, jwtManager)
 
 	app.Use(appMiddleware.NotFound)
 
