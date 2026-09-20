@@ -15,11 +15,13 @@ import (
 var (
 	ErrNotFound  = errors.New("data mahasiswa tidak ditemukan")
 	ErrDuplicate = errors.New("NIM sudah terdaftar")
+	ErrForbidden = errors.New("tidak berhak mengakses data mahasiswa lain")
 )
 
 type StudentRepository interface {
 	FindAll(ctx context.Context, q model.ListQuery) ([]model.Student, int, error)
 	FindByID(ctx context.Context, id int) (model.Student, error)
+	FindByIDOwned(ctx context.Context, id, ownerID int) (model.Student, error)
 	Create(ctx context.Context, s model.Student) (model.Student, error)
 	Update(ctx context.Context, s model.Student) (model.Student, error)
 	Delete(ctx context.Context, id int) error
@@ -76,7 +78,7 @@ func (r *studentPostgresRepository) FindAll(ctx context.Context, q model.ListQue
 	}
 
 	sqlText := fmt.Sprintf(`
-		SELECT id, nim, name, grade, is_active, created_at
+		SELECT id, owner_id, nim, name, grade, is_active, created_at
 		FROM students%s
 		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d`,
@@ -94,7 +96,7 @@ func (r *studentPostgresRepository) FindAll(ctx context.Context, q model.ListQue
 	hasil := []model.Student{}
 	for rows.Next() {
 		var s model.Student
-		if err := rows.Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.OwnerID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("membaca baris mahasiswa: %w", err)
 		}
 		hasil = append(hasil, s)
@@ -106,10 +108,18 @@ func (r *studentPostgresRepository) FindAll(ctx context.Context, q model.ListQue
 }
 
 func (r *studentPostgresRepository) FindByID(ctx context.Context, id int) (model.Student, error) {
+	return r.findByCondition(ctx, "WHERE id = $1", id)
+}
+
+func (r *studentPostgresRepository) FindByIDOwned(ctx context.Context, id, ownerID int) (model.Student, error) {
+	return r.findByCondition(ctx, "WHERE id = $1 AND owner_id = $2", id, ownerID)
+}
+
+func (r *studentPostgresRepository) findByCondition(ctx context.Context, condition string, args ...any) (model.Student, error) {
 	var s model.Student
 	err := r.pool.QueryRow(ctx,
-		"SELECT id, nim, name, grade, is_active, created_at FROM students WHERE id = $1", id,
-	).Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt)
+		"SELECT id, owner_id, nim, name, grade, is_active, created_at FROM students "+condition, args...,
+	).Scan(&s.ID, &s.OwnerID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -122,11 +132,11 @@ func (r *studentPostgresRepository) FindByID(ctx context.Context, id int) (model
 
 func (r *studentPostgresRepository) Create(ctx context.Context, s model.Student) (model.Student, error) {
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO students (nim, name, grade, is_active)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, created_at`,
-		s.NIM, s.Name, s.Grade, s.IsActive,
-	).Scan(&s.ID, &s.CreatedAt)
+		`INSERT INTO students (owner_id, nim, name, grade, is_active)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, owner_id, created_at`,
+		s.OwnerID, s.NIM, s.Name, s.Grade, s.IsActive,
+	).Scan(&s.ID, &s.OwnerID, &s.CreatedAt)
 
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -141,9 +151,9 @@ func (r *studentPostgresRepository) Update(ctx context.Context, s model.Student)
 	err := r.pool.QueryRow(ctx,
 		`UPDATE students SET nim = $1, name = $2, grade = $3, is_active = $4
 		 WHERE id = $5
-		 RETURNING id, nim, name, grade, is_active, created_at`,
+		 RETURNING id, owner_id, nim, name, grade, is_active, created_at`,
 		s.NIM, s.Name, s.Grade, s.IsActive, s.ID,
-	).Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt)
+	).Scan(&s.ID, &s.OwnerID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
