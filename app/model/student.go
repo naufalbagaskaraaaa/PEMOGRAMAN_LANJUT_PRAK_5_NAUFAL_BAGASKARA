@@ -4,6 +4,7 @@ import "time"
 
 type Student struct {
 	ID        int       `json:"id"`
+	OwnerID   *int      `json:"owner_id,omitempty"`
 	NIM       string    `json:"nim"`
 	Name      string    `json:"name"`
 	Grade     float64   `json:"grade"`
