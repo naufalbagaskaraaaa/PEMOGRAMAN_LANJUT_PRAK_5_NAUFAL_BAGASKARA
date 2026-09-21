@@ -6,6 +6,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+func Success(c *fiber.Ctx, status int, message string, data any) error {
+	return c.Status(status).JSON(model.WebResponse{Success: true, Message: message, Data: data})
+}
+
 func OK(c *fiber.Ctx, message string, data any) error {
 	return c.Status(fiber.StatusOK).JSON(model.WebResponse{Success: true, Message: message, Data: data})
 }
