@@ -16,12 +16,13 @@ import (
 const invalidCredentialsMessage = "username atau password salah"
 
 type AuthService struct {
-	repo       repository.AuthRepository
-	jwtManager *helper.JWTManager
-	accessTTL  time.Duration
-	refreshTTL time.Duration
-	loginMu    sync.Mutex
-	loginFails map[string]loginFailure
+	repo        repository.AuthRepository
+	permissions *helper.PermissionSet
+	jwtManager  *helper.JWTManager
+	accessTTL   time.Duration
+	refreshTTL  time.Duration
+	loginMu     sync.Mutex
+	loginFails  map[string]loginFailure
 }
 
 type loginFailure struct {
@@ -34,9 +35,9 @@ const (
 	loginBlockPeriod = 5 * time.Minute
 )
 
-func NewAuthService(repo repository.AuthRepository, jwtManager *helper.JWTManager, accessTTL, refreshTTL time.Duration) *AuthService {
+func NewAuthService(repo repository.AuthRepository, jwtManager *helper.JWTManager, permissions *helper.PermissionSet, accessTTL, refreshTTL time.Duration) *AuthService {
 	return &AuthService{
-		repo: repo, jwtManager: jwtManager, accessTTL: accessTTL, refreshTTL: refreshTTL,
+		repo: repo, permissions: permissions, jwtManager: jwtManager, accessTTL: accessTTL, refreshTTL: refreshTTL,
 		loginFails: make(map[string]loginFailure),
 	}
 }
@@ -196,11 +197,14 @@ func (s *AuthService) Logout(c *fiber.Ctx) error {
 }
 
 func (s *AuthService) Me(c *fiber.Ctx) error {
-	user, ok := c.Locals(helper.LocalsAuthUser).(model.AuthUser)
+	user, ok := helper.CurrentUser(c)
 	if !ok {
 		return helper.Fail(c, fiber.StatusUnauthorized, "token tidak valid")
 	}
-	return helper.OK(c, "profil pengguna berhasil diambil", user)
+	return helper.Success(c, fiber.StatusOK, "profil berhasil diambil", fiber.Map{
+		"user":        user,
+		"permissions": s.permissions.PermissionsOf(user.Role),
+	})
 }
 
 func (s *AuthService) issueTokenPair(user model.User) (model.TokenPair, model.RefreshToken, error) {
