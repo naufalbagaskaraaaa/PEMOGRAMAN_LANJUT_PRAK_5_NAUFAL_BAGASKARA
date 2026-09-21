@@ -1,11 +1,9 @@
-create table prestasi (
-id_prestasi varchar(32) primary key,
-nama_prestasi char(100) not null,
-juara int unique,
-nim varchar(32),
-constraint fk_prestasi_mahasiswa
-foreign key (nim)
-references students(nim)
+CREATE TABLE IF NOT EXISTS public.prestasi (
+	id_prestasi VARCHAR(32) PRIMARY KEY,
+	nama_prestasi CHAR(100) NOT NULL,
+	juara INT UNIQUE,
+	nim VARCHAR(32),
+	CONSTRAINT fk_prestasi_mahasiswa
+		FOREIGN KEY (nim)
+		REFERENCES public.students(nim)
 );
-
-# mantap
