@@ -1,14 +1,16 @@
 package middleware
 
 import (
+	"log/slog"
 	"strings"
+	"time"
 
 	"latihan-fiber/app/model"
 	"latihan-fiber/config"
+	"latihan-fiber/helper"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 )
 
@@ -30,10 +32,25 @@ func RequireJSON(c *fiber.Ctx) error {
 
 func Register(app *fiber.App) {
 	app.Use(requestid.New())
-	app.Use(logger.New(logger.Config{
-		Output: config.LoggerWriter(),
-		Format: "{\"time\":\"${time}\",\"request_id\":\"${locals:requestid}\",\"method\":\"${method}\",\"path\":\"${path}\",\"status\":${status},\"latency\":\"${latency}\"}\n",
-	}))
+	logger := slog.New(slog.NewJSONHandler(config.LoggerWriter(), nil))
+	app.Use(func(c *fiber.Ctx) error {
+		started := time.Now()
+		err := c.Next()
+		requestID, _ := c.Locals("requestid").(string)
+
+		attrs := []any{
+			slog.String("request_id", requestID),
+			slog.String("method", c.Method()),
+			slog.String("path", c.Path()),
+			slog.Int("status", c.Response().StatusCode()),
+			slog.Duration("latency", time.Since(started)),
+		}
+		if user, ok := helper.CurrentUser(c); ok {
+			attrs = append(attrs, slog.Int("user_id", user.UserID), slog.String("role", user.Role))
+		}
+		logger.Info("http_request", attrs...)
+		return err
+	})
 	app.Use(cors.New())
 }
 
