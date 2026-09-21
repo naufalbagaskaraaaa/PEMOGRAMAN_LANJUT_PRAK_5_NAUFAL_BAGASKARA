@@ -86,3 +86,32 @@ func (s *PrestasiService) Get(c *fiber.Ctx) error {
 		prestasi,
 	)
 }
+
+func (s *PrestasiService) ListByNIM(c *fiber.Ctx) error {
+	nim := strings.TrimSpace(c.Params("nim"))
+	if nim == "" {
+		return helper.Fail(
+			c,
+			fiber.StatusBadRequest,
+			"nim wajib diisi",
+		)
+	}
+
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+
+	prestasiList, err := s.repo.FindByNIM(ctx, nim)
+	if err != nil {
+		return helper.Fail(
+			c,
+			fiber.StatusInternalServerError,
+			"gagal mengambil data prestasi",
+		)
+	}
+
+	return helper.OK(
+		c,
+		"data prestasi berhasil diambil",
+		prestasiList,
+	)
+}
