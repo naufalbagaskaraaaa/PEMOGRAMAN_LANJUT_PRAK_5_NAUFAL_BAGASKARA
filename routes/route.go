@@ -42,7 +42,11 @@ func Register(app *fiber.App, deps Dependencies) {
 
 	students := api.Group("/students", middleware.RequireAuth(deps.JWT), middleware.RequireJSON)
 	perms := deps.Permissions
+
 	students.Get("/", middleware.RequirePermission(perms, "student:list"), deps.StudentService.List)
+
+	students.Get("/:nim/prestasi", deps.PrestasiService.ListByNIM)
+
 	students.Get("/:id", deps.StudentService.Get)
 	students.Post("/", middleware.RequirePermission(perms, "student:create"), deps.StudentService.Create)
 	students.Put("/:id", deps.StudentService.Replace)
