@@ -4,25 +4,30 @@ REST API mahasiswa dengan Fiber, PostgreSQL, dan Repository Pattern.
 
 ## Skema Tabel
 
-Migrasi ada di `migrations/001_create_students.sql`. Autentikasi memakai `migrations/003_auth.sql`, yang membuat tabel `users` bila belum tersedia dan tabel `refresh_tokens`.
+Migrasi dijalankan berurutan dari `migrations/001_create_students.sql` sampai `migrations/004_student_permissions.sql`. Migration auth membuat tabel `users` dan `refresh_tokens`, migration RBAC membuat roles/permissions, sedangkan migration student permissions menambahkan ownership mahasiswa.
+
+Untuk Modul 2 tersedia `repository.NewStudentMemoryRepository`, yaitu implementasi repository berbasis slice memory dengan filtering, sorting, dan pagination di Go. Composition root produksi tetap memakai repository PostgreSQL untuk Modul 3.
 
 | Kolom | Tipe | Batasan |
 | --- | --- | --- |
 | `id` | `SERIAL` | Primary key |
+| `owner_id` | `INTEGER` | Foreign key ke `users(id)`, nullable untuk data lama |
 | `nim` | `VARCHAR(32)` | Wajib, unik |
 | `name` | `VARCHAR(120)` | Wajib |
 | `grade` | `NUMERIC(3,2)` | Wajib, 0 sampai 4 |
 | `is_active` | `BOOLEAN` | Wajib, default `TRUE` |
 | `created_at` | `TIMESTAMPTZ` | Wajib, default waktu saat insert |
 
-Indeks `idx_students_name` membantu pencarian dan pengurutan berdasarkan nama. Keunikan NIM dijaga oleh database karena constraint berlaku konsisten untuk semua client dan aman terhadap race condition saat dua request berjalan bersamaan. Kode Go tetap menerjemahkan pelanggaran constraint menjadi `409 Conflict`.
+Indeks `idx_students_name` membantu pencarian dan pengurutan berdasarkan nama, `idx_students_nim_unique` menjamin keunikan NIM secara eksplisit, sedangkan `students_owner_id_idx` membantu pencarian berdasarkan pemilik. Keunikan NIM dijaga oleh database karena constraint berlaku konsisten untuk semua client dan aman terhadap race condition saat dua request berjalan bersamaan. Kode Go menerjemahkan pelanggaran constraint menjadi `409 Conflict`.
+
+Tabel `roles`, `permissions`, dan `role_permissions` pada `003_rbac.sql` menyimpan matriks hak akses. `role_permissions` memakai primary key gabungan agar satu permission tidak terpasang dua kali pada role yang sama. Foreign key `students.owner_id` memakai `ON DELETE` default sehingga akun tidak otomatis menghapus data mahasiswa; data lama yang owner-nya tidak valid dinormalkan menjadi `NULL` sebelum foreign key dipasang.
 
 ## Menyiapkan Database
 
 1. Buat database PostgreSQL, misalnya `latihan_fiber`.
 2. Salin `.env.example` menjadi `.env`, lalu isi kredensial PostgreSQL.
 3. Jalankan `migrations/001_create_students.sql` pada database tersebut, misalnya dengan `psql`.
-4. Jalankan migrasi lain sesuai urutan: `002_create_prestasi.sql`, lalu `003_auth.sql`.
+4. Jalankan migrasi lain sesuai urutan: `002_create_prestasi.sql`, `003_auth.sql`, `003_rbac.sql`, lalu `004_student_permissions.sql`.
 5. Isi `JWT_SECRET` dengan secret acak yang panjang, lalu jalankan API dengan `go run .`.
 
 Untuk database praktikum yang sudah berisi akun lama, kosongkan data akun sebelum migrasi autentikasi dengan `TRUNCATE TABLE users CASCADE;`. Langkah ini hanya untuk database praktikum karena bersifat destruktif. Password lama tidak dapat dipulihkan atau di-hash ulang tanpa mengetahui plaintext password; karena itu akun harus dibuat ulang melalui endpoint register.
@@ -43,28 +48,49 @@ Untuk laporan, buktikan dengan `go test ./...` dan tangkapan layar database bahw
 
 | Metode | Endpoint | Parameter / Query | Contoh body | Kemungkinan status | Contoh respons |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/students` | `page`, `limit`, `search`, `sort`, `order`, `is_active` | - | `200`, `401`, `503` | `{"success":true,"message":"daftar mahasiswa berhasil diambil","data":[],"meta":{"page":1,"limit":10,"total":0,"total_pages":0}}` |
-| `GET` | `/api/v1/students/:id` | `id` | - | `200`, `400`, `401`, `404` | `{"success":true,"message":"mahasiswa ditemukan","data":{...}}` |
-| `POST` | `/api/v1/students` | - | `{"nim":"A01","name":"Budi","grade":3.5}` | `201`, `401`, `409`, `415`, `422` | `{"success":true,"message":"mahasiswa berhasil dibuat","data":{...}}` |
-| `PUT` | `/api/v1/students/:id` | `id` | `{"nim":"A01","name":"Budi","grade":3.5,"is_active":true}` | `200`, `400`, `401`, `404`, `409`, `415`, `422` | `{"success":true,"message":"data mahasiswa berhasil diganti seluruhnya","data":{...}}` |
-| `PATCH` | `/api/v1/students/:id` | `id` | `{"name":"Budi Baru"}` | `200`, `400`, `401`, `404`, `409`, `415`, `422` | `{"success":true,"message":"data mahasiswa berhasil diperbarui sebagian","data":{...}}` |
-| `DELETE` | `/api/v1/students/:id` | `id` | - | `204`, `401`, `404` | tanpa body |
+| `GET` | `/api/v1/students` | `page`, `limit`, `search`, `sort`, `order`, `is_active` | - | `200`, `401`, `403`, `503` | `{"success":true,"message":"daftar mahasiswa berhasil diambil","data":[],"meta":{"page":1,"limit":10,"total":0,"total_pages":0}}` |
+| `GET` | `/api/v1/students/:id` | `id` | - | `200`, `400`, `401`, `403`, `404` | `{"success":true,"message":"mahasiswa ditemukan","data":{"id":1,"owner_id":2,...}}` |
+| `POST` | `/api/v1/students` | - | `{"nim":"A01","name":"Budi","grade":3.5}` | `201`, `401`, `403`, `409`, `415`, `422` | `{"success":true,"message":"mahasiswa berhasil dibuat","data":{"owner_id":2,...}}` |
+| `PUT` | `/api/v1/students/:id` | `id` | `{"nim":"A01","name":"Budi","grade":3.5,"is_active":true}` | `200`, `400`, `401`, `403`, `404`, `409`, `415`, `422` | `{"success":true,"message":"data mahasiswa berhasil diganti seluruhnya","data":{...}}` |
+| `PATCH` | `/api/v1/students/:id` | `id` | `{"name":"Budi Baru"}` | `200`, `400`, `401`, `403`, `404`, `409`, `415`, `422` | `{"success":true,"message":"data mahasiswa berhasil diperbarui sebagian","data":{...}}` |
+| `DELETE` | `/api/v1/students/:id` | `id` | - | `204`, `401`, `403`, `404` | tanpa body |
 | `POST` | `/api/v1/auth/register` | - | `{"username":"budi","email":"budi@example.com","password":"Rahasia123"}` | `201`, `415`, `409`, `422` | `{"success":true,"message":"pengguna berhasil didaftarkan","data":{...}}` |
 | `POST` | `/api/v1/auth/login` | - | `{"username":"budi","password":"Rahasia123"}` | `200`, `401`, `415`, `422` | `{"success":true,"message":"berhasil masuk","data":{"access_token":"...","refresh_token":"..."}}` |
+| `POST` | `/api/v1/auth/refresh` | - | `{"refresh_token":"..."}` | `200`, `401`, `415` | `{"success":true,"message":"token berhasil diperbarui","data":{...}}` |
+| `POST` | `/api/v1/auth/logout` | - | `{"refresh_token":"..."}` | `204`, `400`, `415` | tanpa body |
+| `GET` | `/api/v1/auth/me` | Bearer access token | - | `200`, `401` | `{"success":true,"data":{"user":{...},"permissions":[...]}}` |
 
 Pencarian nama memakai `ILIKE`, filter menggunakan parameter query, pengurutan dibatasi whitelist kolom, dan paginasi memakai `LIMIT` serta `OFFSET`. Nilai `meta.total` dihitung dengan `SELECT COUNT(*)` menggunakan filter yang sama.
+
+## Matriks Permission
+
+| Role | Permission |
+| --- | --- |
+| `admin` | `user:list`, `user:read:any`, `user:update:any`, `user:delete`, `role:assign`, seluruh permission student |
+| `staff` | `user:list`, `user:read:any`, `student:list`, `student:read:any`, `student:create` |
+| `user` | Akses data milik sendiri melalui pemeriksaan ownership di service |
+
+Permission yang bersifat global dipasang sebagai middleware `RequirePermission`. Akses yang bergantung pada pemilik data diperiksa di service menggunakan `CanAccessStudent` atau aturan user yang setara. `PermissionSet.Can` fail closed jika role, permission, atau receiver tidak dikenal.
+
+## Ownership Student
+
+`owner_id` tidak boleh dikirim atau diubah melalui JSON request. Pada `POST /students`, service selalu mengisi `owner_id` dari `current.UserID` pada JWT. Pada `GET`, `PUT`, dan `PATCH`, service memakai query ownership-aware untuk user biasa dan hanya memakai `FindByID` untuk user yang memiliki permission global. Dengan demikian keputusan akses dibuat sebelum query umum dan mengurangi kebocoran timing berdasarkan keberadaan data.
+
+## Endpoint RBAC
+
+Route `/api/v1/users` memakai `RequireAuth` dan `RequirePermission` untuk list, create, delete, serta assign role. Detail user (`GET/PUT/PATCH /users/:id`) diteruskan ke service karena pemeriksaannya bergantung pada kepemilikan data. `main.go` sekarang membuat `UserRepository` dan `UserService`, sehingga route users aktif.
 
 ## Peta Arsitektur
 
 | Folder/package | Layer | Tanggung jawab |
 | --- | --- | --- |
 | `app/model` | Domain | Entity, request model, dan response model tanpa dependency package internal lain |
-| `app/service` | Application | Business rules dan service/controller yang mengatur alur request |
+| `app/service` | Application | Business rules, authorization, ownership, dan service/controller |
 | `app/repository` | Infrastructure | Interface repository dan query PostgreSQL |
 | `database` | Infrastructure | Pembuatan connection pool dan ping database |
 | `config` | Infrastructure | Environment dan konfigurasi logger Lumberjack |
 | `helper` | Interface adapter | Parsing request dan response HTTP umum |
-| `middleware` | Interface adapter | Request ID, logger HTTP, CORS, dan error handler |
+| `middleware` | Interface adapter | Request ID, structured logger HTTP, CORS, authentication, dan authorization |
 | `route` | Interface adapter | Pendaftaran alamat endpoint tanpa SQL atau validasi bisnis |
 | `main.go` | Composition root | Merakit dependency dan menjalankan aplikasi |
 
@@ -81,11 +107,15 @@ Struktur ini disederhanakan dibandingkan Clean Architecture murni karena belum m
 - `app/model` hanya memakai standard library (`time`) dan tidak mengimpor package internal project.
 - `app/repository` tidak mengimpor Fiber; package ini hanya bergantung pada model dan pgx.
 - `app/service` tidak berisi SQL; query hanya berada di repository.
-- `route/route.go` hanya mendaftarkan routes dan middleware.
+- `app/service/authz_rules.go` dan `app/service/student_authz_rules.go` adalah fungsi murni tanpa Fiber atau repository.
+- `middleware/authz.go` hanya memeriksa identitas dan permission; aturan ownership tetap berada di service.
+- `routes/route.go` hanya mendaftarkan routes dan middleware.
 - `main.go` hanya memuat konfigurasi, pool, repository, service, middleware, routes, dan server.
 
-Saat restrukturisasi, logika validasi dan penerapan PATCH yang sebelumnya berada di handler dipindahkan ke `app/service/student_rules.go`. Pendaftaran routes dipindahkan dari `main.go` ke `route/route.go`, sedangkan health check dan error handler dipindahkan ke service/middleware.
+Saat restrukturisasi, logika validasi dan penerapan PATCH yang sebelumnya berada di handler dipindahkan ke `app/service/student_rules.go`. Pendaftaran routes dipindahkan dari `main.go` ke `routes/route.go`, sedangkan health check dan error handler dipindahkan ke service/middleware. Saat boot, `main.go` memuat permission melalui `RoleRepository`, membangun `PermissionSet`, lalu menyuntikkannya ke service.
+
+Structured logging menggunakan `log/slog` dan mencatat request ID, method, path, status, latency, serta `user_id` dan `role` bila request terautentikasi.
 
 ## Laporan
 
-Laporan dikumpulkan sebagai `Tugas4_NIM.pdf` dan memuat tautan repositori GitHub pada halaman pertama, struktur folder akhir, peta arsitektur, diagram dependency, potongan kode penting, output `go test ./...`, screenshot endpoint, serta penjelasan bantuan yang digunakan termasuk tools AI dan bagian yang dibantu.
+Laporan dikumpulkan sebagai `Tugas6_NIM.pdf` dan memuat tautan repositori GitHub pada halaman pertama, struktur folder akhir, peta arsitektur, diagram dependency, potongan kode penting, output `go test ./...`, screenshot endpoint, serta penjelasan bantuan yang digunakan termasuk tools AI dan bagian yang dibantu.
