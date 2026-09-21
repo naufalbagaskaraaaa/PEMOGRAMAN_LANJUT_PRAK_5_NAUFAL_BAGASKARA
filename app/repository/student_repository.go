@@ -130,6 +130,21 @@ func (r *studentPostgresRepository) findByCondition(ctx context.Context, conditi
 	return s, nil
 }
 
+func (r *studentPostgresRepository) ShowAllPrestasiByNIM(ctx context.Context, nim string) (model.Student, error) {
+	var s model.Student
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, owner_id, nim, name, grade, is_active, created_at FROM students WHERE nim = $1`, nim,
+	).Scan(&s.ID, &s.OwnerID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.CreatedAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.Student{}, ErrNotFound
+		}
+		return model.Student{}, fmt.Errorf("mengambil mahasiswa: %w", err)
+	}
+	return s, nil
+}
+
 func (r *studentPostgresRepository) Create(ctx context.Context, s model.Student) (model.Student, error) {
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO students (owner_id, nim, name, grade, is_active)
@@ -185,3 +200,4 @@ func isUniqueViolation(err error) bool {
 	}
 	return false
 }
+
