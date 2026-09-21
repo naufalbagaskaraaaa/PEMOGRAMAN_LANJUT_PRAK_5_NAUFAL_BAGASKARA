@@ -16,6 +16,7 @@ var ErrPrestasiNotFound = errors.New("prestasi tidak ditemukan")
 type PrestasiRepository interface {
 	FindByID(ctx context.Context, idPrestasi string) (model.Prestasi, error)
 	Create(ctx context.Context, req model.CreatePrestasiRequest) (model.Prestasi, error)
+	FindByNIM(ctx context.Context, nim string) ([]model.Prestasi, error)
 }
 
 type prestasiPostgresRepository struct {
@@ -46,6 +47,52 @@ func (r *prestasiPostgresRepository) Create(
 	}
 	prestasi.NamaPrestasi = strings.TrimSpace(prestasi.NamaPrestasi)
 	return prestasi, nil
+}
+
+func (r *prestasiPostgresRepository) FindByNIM(
+	ctx context.Context,
+	nim string,
+) ([]model.Prestasi, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id_prestasi,
+			nama_prestasi,
+			juara,
+			nim
+		FROM prestasi
+		WHERE nim = $1
+		ORDER BY juara ASC
+	`, nim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	prestasilist := []model.Prestasi{}
+
+	for rows.Next() {
+		var prestasi model.Prestasi
+		var namaPrestasi string
+
+		err := rows.Scan(
+			&prestasi.IDPrestasi,
+			&namaPrestasi,
+			&prestasi.Juara,
+			&prestasi.NIM,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		prestasi.NamaPrestasi = strings.TrimSpace(namaPrestasi)
+		prestasilist = append(prestasilist, prestasi)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return prestasilist, nil
 }
 
 func (r *prestasiPostgresRepository) FindByID(
