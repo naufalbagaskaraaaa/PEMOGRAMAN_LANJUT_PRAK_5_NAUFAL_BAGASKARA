@@ -36,6 +36,7 @@ func main() {
 	authRepo := repository.NewAuthRepository(pool)
 	userRepo := repository.NewUserRepository(pool)
 	roleRepo := repository.NewRoleRepository(pool)
+
 	rawPermissions, err := roleRepo.LoadPermissions(ctx)
 	if err != nil {
 		log.Fatalf("gagal memuat permission: %v", err)
@@ -45,7 +46,7 @@ func main() {
 
 	studentService := service.NewStudentService(studentRepo, permissions)
 	prestasiService := service.NewPrestasiService(prestasiRepo)
-	
+
 	userService := service.NewUserService(userRepo, permissions)
 	jwtSecret, err := config.RequiredEnv("JWT_SECRET")
 	if err != nil {
@@ -62,13 +63,13 @@ func main() {
 	appMiddleware.Register(app)
 
 	routes.Register(app, routes.Dependencies{
-		Pool:           pool,
-		StudentService: studentService,
+		Pool:            pool,
+		StudentService:  studentService,
 		PrestasiService: prestasiService,
-		AuthService:    authService,
-		UserService:    userService,
-		JWT:            jwtManager,
-		Permissions:    permissions,
+		AuthService:     authService,
+		UserService:     userService,
+		JWT:             jwtManager,
+		Permissions:     permissions,
 	})
 
 	app.Use(appMiddleware.NotFound)
